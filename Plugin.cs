@@ -21,7 +21,7 @@ namespace BlasSkinUnlocker
     //   ON  -> ColorPaletteManager.UnlockColorPalette(id, showPopup:false)   (persists internally)
     //   OFF -> ColorPaletteManager.LockColorPalette(id) + SetCurrentSkinToSkinSettings(current)
     //          to force the lock to be written.
-    [BepInPlugin("local.blasphemous.skinunlocker", "Blasphemous Skin Unlocker", "1.0.0")]
+    [BepInPlugin("local.blasphemous.skinunlocker", "Blasphemous Skin Unlocker", "1.1.0")]
     public class SkinUnlocker : BaseUnityPlugin
     {
         const string CoreName   = "Framework.Managers.Core";
@@ -33,7 +33,7 @@ namespace BlasSkinUnlocker
         ConfigEntry<bool>    cfgAutoShow;
 
         PropertyInfo pCorePalettes;   // static Core.ColorPaletteManager
-        MethodInfo mGetAllIds, mIsUnlocked, mUnlock, mLock, mGetCurrent, mSetSkinSettings, mGetSprite;
+        MethodInfo mGetAllIds, mGetUnlockedIds, mUnlock, mLock, mGetCurrent, mSetSkinSettings, mGetSprite;
 
         Type extrasType;
         PropertyInfo pExtrasActive;
@@ -69,7 +69,9 @@ namespace BlasSkinUnlocker
             if (mgrType != null)
             {
                 mGetAllIds       = mgrType.GetMethod("GetAllColorPalettesId", ip, null, Type.EmptyTypes, null);
-                mIsUnlocked      = mgrType.GetMethod("IsColorPaletteUnlocked", ip, null, new[] { typeof(string) }, null);
+                // Use the unlocked-id list (unions palettesStates + dlcPalettes) rather than
+                // IsColorPaletteUnlocked, which reads only DLC ownership for the DLC skins.
+                mGetUnlockedIds  = mgrType.GetMethod("GetAllUnlockedColorPalettesId", ip, null, Type.EmptyTypes, null);
                 mUnlock          = mgrType.GetMethod("UnlockColorPalette", ip, null, new[] { typeof(string), typeof(bool) }, null);
                 mLock            = mgrType.GetMethod("LockColorPalette", ip, null, new[] { typeof(string) }, null);
                 mGetCurrent      = mgrType.GetMethod("GetCurrentColorPaletteId", ip, null, Type.EmptyTypes, null);
@@ -85,8 +87,8 @@ namespace BlasSkinUnlocker
                 if (menuType != null) menuSkinSelector = SafeGet(() => Enum.Parse(menuType, "SKINSELECTOR"));
             }
 
-            ready = pCorePalettes != null && mGetAllIds != null && mIsUnlocked != null && mUnlock != null && mLock != null;
-            L.LogInfo($"[SkinUnlocker] v1.0 ready={ready}. skinsPage={extrasType != null && fCurrentMenu != null}. {cfgToggleKey.Value}=toggle panel.");
+            ready = pCorePalettes != null && mGetAllIds != null && mGetUnlockedIds != null && mUnlock != null && mLock != null;
+            L.LogInfo($"[SkinUnlocker] v1.1 ready={ready}. skinsPage={extrasType != null && fCurrentMenu != null}. {cfgToggleKey.Value}=toggle panel.");
             if (!ready) L.LogWarning("[SkinUnlocker] color palette API not fully resolved - toggling may be unavailable.");
         }
 
@@ -126,8 +128,15 @@ namespace BlasSkinUnlocker
             foreach (object id in ids) if (id is string s && !string.IsNullOrEmpty(s)) skins.Add(s);
         }
 
-        bool IsUnlocked(object mgr, string id)
-            => SafeGet(() => mIsUnlocked.Invoke(mgr, new object[] { id })) is bool b && b;
+        // The set of currently-unlocked skin ids (covers normal skins AND DLC skins force-unlocked
+        // by this mod). Rebuilt each frame; cheap for a menu panel.
+        HashSet<string> UnlockedSet(object mgr)
+        {
+            var set = new HashSet<string>();
+            var ids = SafeGet(() => mGetUnlockedIds.Invoke(mgr, null)) as IEnumerable;
+            if (ids != null) foreach (object id in ids) if (id is string s) set.Add(s);
+            return set;
+        }
 
         void SetUnlocked(string id, bool unlocked)
         {
@@ -176,8 +185,9 @@ namespace BlasSkinUnlocker
             GUI.DrawTexture(new Rect(x, y, w, h), panelBg);
             GUILayout.BeginArea(new Rect(x + 12f, y + 10f, w - 24f, h - 20f));
 
+            var unlockedSet = UnlockedSet(mgr);
             int total = skins.Count, unlocked = 0;
-            foreach (var id in skins) if (IsUnlocked(mgr, id)) unlocked++;
+            foreach (var id in skins) if (unlockedSet.Contains(id)) unlocked++;
             GUILayout.Label($"Skin Unlocker    {unlocked} / {total} unlocked", titleStyle);
 
             GUILayout.BeginHorizontal();
@@ -195,7 +205,7 @@ namespace BlasSkinUnlocker
             foreach (var id in skins)
             {
                 if (f.Length > 0 && id.ToLowerInvariant().IndexOf(f, StringComparison.Ordinal) < 0) continue;
-                bool isOn = IsUnlocked(mgr, id);
+                bool isOn = unlockedSet.Contains(id);
 
                 GUILayout.BeginHorizontal(i++ % 2 == 0 ? Bg(rowBg) : Bg(rowBgAlt), GUILayout.Height(22f));
                 DrawSwatch(mgr, id);
