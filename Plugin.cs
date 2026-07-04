@@ -21,7 +21,7 @@ namespace BlasSkinUnlocker
     //   ON  -> ColorPaletteManager.UnlockColorPalette(id, showPopup:false)   (persists internally)
     //   OFF -> ColorPaletteManager.LockColorPalette(id) + SetCurrentSkinToSkinSettings(current)
     //          to force the lock to be written.
-    [BepInPlugin("local.blasphemous.skinunlocker", "Blasphemous Skin Unlocker", "1.1.0")]
+    [BepInPlugin("local.blasphemous.skinunlocker", "Blasphemous Skin Unlocker", "1.2.0")]
     public class SkinUnlocker : BaseUnityPlugin
     {
         const string CoreName   = "Framework.Managers.Core";
@@ -43,7 +43,7 @@ namespace BlasSkinUnlocker
         bool ready;
         float gateAccum;
         bool onSkinsPage;
-        bool forceShown;
+        bool userHidden;   // hid the panel with the hotkey while on the Skins page
 
         List<string> skins;
         Vector2 scroll;
@@ -54,8 +54,8 @@ namespace BlasSkinUnlocker
         void Awake()
         {
             L = Logger;
-            cfgToggleKey = Config.Bind("Keys", "TogglePanel", KeyCode.F9, "Show / hide the skin unlock panel.");
-            cfgAutoShow  = Config.Bind("Panel", "AutoShowOnSkinsPage", true, "Automatically show the panel while the in-game Skins page is open.");
+            cfgToggleKey = Config.Bind("Keys", "TogglePanel", KeyCode.F9, "Hide / show the panel WHILE the Skins page is open (does nothing elsewhere, so it won't clash with other mods during gameplay).");
+            cfgAutoShow  = Config.Bind("Panel", "ShowOnSkinsPage", true, "Show the panel while the Skins page is open.");
 
             var coreType = FindType(CoreName);
             extrasType   = FindType(ExtrasName);
@@ -88,7 +88,7 @@ namespace BlasSkinUnlocker
             }
 
             ready = pCorePalettes != null && mGetAllIds != null && mGetUnlockedIds != null && mUnlock != null && mLock != null;
-            L.LogInfo($"[SkinUnlocker] v1.1 ready={ready}. skinsPage={extrasType != null && fCurrentMenu != null}. {cfgToggleKey.Value}=toggle panel.");
+            L.LogInfo($"[SkinUnlocker] v1.2 ready={ready}. skinsPage={extrasType != null && fCurrentMenu != null}. {cfgToggleKey.Value}=toggle panel.");
             if (!ready) L.LogWarning("[SkinUnlocker] color palette API not fully resolved - toggling may be unavailable.");
         }
 
@@ -97,12 +97,16 @@ namespace BlasSkinUnlocker
             gateAccum += Time.unscaledDeltaTime;
             if (gateAccum >= 0.3f) { gateAccum = 0f; onSkinsPage = IsOnSkinsPage(); }
 
-            if (Input.GetKeyDown(cfgToggleKey.Value)) { forceShown = !forceShown; if (PanelVisible()) BuildList(); }
+            // The hotkey only hides/shows the panel WHILE the Skins page is open, so it can't clash
+            // with other mods' hotkeys during normal gameplay. Reset when we leave the page.
+            if (onSkinsPage) { if (Input.GetKeyDown(cfgToggleKey.Value)) userHidden = !userHidden; }
+            else userHidden = false;
+
             if (PanelVisible() && skins == null) BuildList();
             if (!PanelVisible()) skins = null;
         }
 
-        bool PanelVisible() => forceShown || (cfgAutoShow.Value && onSkinsPage);
+        bool PanelVisible() => onSkinsPage && cfgAutoShow.Value && !userHidden;
 
         bool IsOnSkinsPage()
         {
@@ -195,7 +199,7 @@ namespace BlasSkinUnlocker
             if (GUILayout.Button("Lock all",   btnStyle, GUILayout.Width(80f))) SetAll(false);
             GUILayout.Label("Filter:", hintStyle, GUILayout.Width(40f));
             filter = GUILayout.TextField(filter ?? "", GUILayout.MinWidth(110f));
-            if (GUILayout.Button("Close", btnStyle, GUILayout.Width(64f))) forceShown = false;
+            if (GUILayout.Button("Close", btnStyle, GUILayout.Width(64f))) userHidden = true;
             GUILayout.EndHorizontal();
             GUILayout.Space(4f);
 
