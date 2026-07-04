@@ -1,0 +1,11 @@
+<!-- Copy this file to GameDir.local.props and set <GameDir> to your install.
+     GameDir.local.props is gitignored, so your local path stays out of the repo. -->
+<Project>
+  <PropertyGroup>
+    <!-- Windows -->
+    <GameDir>C:\Program Files (x86)\Steam\steamapps\common\Blasphemous</GameDir>
+
+    <!-- Linux / Proton (uncomment and edit; comment out the Windows line above) -->
+    <!-- <GameDir>/home/you/.local/share/Steam/steamapps/common/Blasphemous</GameDir> -->
+  </PropertyGroup>
+</Project>
