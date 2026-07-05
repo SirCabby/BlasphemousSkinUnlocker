@@ -11,7 +11,6 @@ This mod is open source!  Check it out at [url=https://github.com/SirCabby/Blasp
 [*][b]Filter[/b] box to find a skin quickly.
 [*]Newly unlocked skins show up in the game's skin carousel.
 [/list]
-Because Blasphemous doesn't give skins in-game names, each row shows the skin's internal id plus a [b]color palette swatch[/b] so you can tell them apart at a glance.
 
 [size=5][b]Requirements[/b][/size]
 [list]
