@@ -10,6 +10,7 @@ This mod is open source!  Check it out at [url=https://github.com/SirCabby/Blasp
 [*][b]Unlock[/b] or [b]Lock[/b] any skin, or use [b]Unlock all[/b] / [b]Lock all[/b].
 [*][b]Filter[/b] box to find a skin quickly.
 [*]Newly unlocked skins show up in the game's skin carousel.
+[*]Unlocks [b]stick across restarts[/b] — including the [b]Backer[/b] and [b]Deluxe[/b] DLC skins, which the game itself refuses to save.
 [/list]
 
 [size=5][b]Requirements[/b][/size]
@@ -39,14 +40,14 @@ This mod is open source!  Check it out at [url=https://github.com/SirCabby/Blasp
 [*]Open [b]Extras → Skins[/b]. The toggle panel appears.
 [*]Click [b]Unlock[/b] / [b]Lock[/b] on any skin (use the mouse — the cursor is shown while the panel is open).
 [*]Reopen the Skins page to see newly unlocked skins in the carousel.
-[*]Press [b]F9[/b] any time to hide or show the panel.
+[*]Press [b]F9[/b] while the Skins page is open to hide or show the panel.
 [/list]
 
 [size=5][b]Uninstall[/b][/size]
-Delete [b]BlasSkinUnlocker.dll[/b] from [i]BepInEx\plugins[/i]. Any skins you already unlocked stay unlocked; the Skins page returns to normal.
+Delete [b]BlasSkinUnlocker.dll[/b] from [i]BepInEx\plugins[/i]. Any skins you already unlocked stay unlocked; the Skins page returns to normal. The two DLC skins ([b]Backer[/b] / [b]Deluxe[/b]) are the exception — the game only ever grants those with the DLC installed, so they go back to locked.
 
 [size=5][b]Troubleshooting[/b][/size]
 [list]
-[*][b]Panel doesn't appear?[/b] Press [b]F9[/b] to force it on. Then open [i]BepInEx\LogOutput.log[/i] and look for [b][SkinUnlocker] v1.0 ready=True[/b]; a warning there means the game's skin code didn't match (e.g. after a game update).
+[*][b]Panel doesn't appear?[/b] It only shows on the [b]Extras → Skins[/b] page; press [b]F9[/b] there if you hid it. Then open [i]BepInEx\LogOutput.log[/i] and look for [b][SkinUnlocker] v1.3 ready=True[/b]; a warning there means the game's skin code didn't match (e.g. after a game update).
 [*][b]Nothing loads at all?[/b] Double-check you used BepInEx [b]5.4.x x64 (Mono)[/b], extracted it into the game folder (not a subfolder), and ran the game once before adding the DLL.
 [/list]

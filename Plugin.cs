@@ -17,23 +17,35 @@ namespace BlasSkinUnlocker
     // "Alloy of Sin" / "Golden Burden" aren't in the game). So this mod overlays an IMGUI panel on
     // the Skins page listing EVERY skin id with its color-palette swatch and an unlock toggle.
     //
-    // Toggling uses the manager's own methods (which persist to the skin-settings file):
+    // Normal skins go through the manager's own methods, which persist to the skin-settings file:
     //   ON  -> ColorPaletteManager.UnlockColorPalette(id, showPopup:false)   (persists internally)
     //   OFF -> ColorPaletteManager.LockColorPalette(id) + SetCurrentSkinToSkinSettings(current)
     //          to force the lock to be written.
-    [BepInPlugin("local.blasphemous.skinunlocker", "Blasphemous Skin Unlocker", "1.2.0")]
+    //
+    // The two DLC skins (PENITENT_BACKER, PENITENT_DELUXE) can't persist that way at all. The game
+    // keeps them in a separate `dlcPalettes` ownership map, writes their "<id>_UNLOCKED" flag from
+    // that map (InitializeSkinFile -> IsColorPaletteUnlocked, i.e. always false without the DLC),
+    // and strips those keys from the file again while loading (CleanOldSaveFileFormat). So for
+    // those ids the mod flips `dlcPalettes` directly, remembers them in its own config, and
+    // re-applies them at every launch - along with the saved skin selection, which Initialize()
+    // resets to the default while the DLC skin still looks locked.
+    [BepInPlugin("local.blasphemous.skinunlocker", "Blasphemous Skin Unlocker", "1.3.0")]
     public class SkinUnlocker : BaseUnityPlugin
     {
-        const string CoreName   = "Framework.Managers.Core";
-        const string ExtrasName = "Gameplay.UI.Others.MenuLogic.ExtrasMenuWidget";
+        const string CoreName    = "Framework.Managers.Core";
+        const string ExtrasName  = "Gameplay.UI.Others.MenuLogic.ExtrasMenuWidget";
+        const string DefaultSkin = "PENITENT_DEFAULT";
 
         static ManualLogSource L;
 
         ConfigEntry<KeyCode> cfgToggleKey;
         ConfigEntry<bool>    cfgAutoShow;
+        ConfigEntry<string>  cfgForcedDlc;
 
         PropertyInfo pCorePalettes;   // static Core.ColorPaletteManager
         MethodInfo mGetAllIds, mGetUnlockedIds, mUnlock, mLock, mGetCurrent, mSetSkinSettings, mGetSprite;
+        MethodInfo mSetCurrent, mGetSettingsPath, mParseSettings;   // DLC persistence
+        FieldInfo fDlcPalettes, fDlcPaletteIds;                     // DLC persistence
 
         Type extrasType;
         PropertyInfo pExtrasActive;
@@ -44,6 +56,10 @@ namespace BlasSkinUnlocker
         float gateAccum;
         bool onSkinsPage;
         bool userHidden;   // hid the panel with the hotkey while on the Skins page
+
+        readonly HashSet<string> forcedDlc = new HashSet<string>();   // DLC skins this mod unlocked
+        HashSet<string> dlcSkinIds;                                   // the game's DLC skin ids
+        object repairedMgr;                                           // manager we already repaired
 
         List<string> skins;
         Vector2 scroll;
@@ -56,6 +72,13 @@ namespace BlasSkinUnlocker
             L = Logger;
             cfgToggleKey = Config.Bind("Keys", "TogglePanel", KeyCode.F9, "Hide / show the panel WHILE the Skins page is open (does nothing elsewhere, so it won't clash with other mods during gameplay).");
             cfgAutoShow  = Config.Bind("Panel", "ShowOnSkinsPage", true, "Show the panel while the Skins page is open.");
+            cfgForcedDlc = Config.Bind("Persistence", "ForcedDlcUnlocks", "",
+                "Comma-separated DLC skin ids unlocked by this mod (PENITENT_BACKER, PENITENT_DELUXE). The game derives those two from DLC ownership and refuses to keep them in its own save file, so the mod re-applies them at every launch. Maintained automatically by the Unlock / Lock buttons.");
+            foreach (var s in (cfgForcedDlc.Value ?? "").Split(','))
+            {
+                var t = s.Trim();
+                if (t.Length > 0) forcedDlc.Add(t);
+            }
 
             var coreType = FindType(CoreName);
             extrasType   = FindType(ExtrasName);
@@ -75,8 +98,14 @@ namespace BlasSkinUnlocker
                 mUnlock          = mgrType.GetMethod("UnlockColorPalette", ip, null, new[] { typeof(string), typeof(bool) }, null);
                 mLock            = mgrType.GetMethod("LockColorPalette", ip, null, new[] { typeof(string) }, null);
                 mGetCurrent      = mgrType.GetMethod("GetCurrentColorPaletteId", ip, null, Type.EmptyTypes, null);
+                mSetCurrent      = mgrType.GetMethod("SetCurrentColorPaletteId", ip, null, new[] { typeof(string) }, null);
                 mSetSkinSettings = mgrType.GetMethod("SetCurrentSkinToSkinSettings", ip, null, new[] { typeof(string) }, null);
                 mGetSprite       = mgrType.GetMethod("GetColorPaletteById", ip, null, new[] { typeof(string) }, null);
+                // DLC ownership map + the skin-settings reader, used to make DLC unlocks survive a restart.
+                fDlcPalettes     = mgrType.GetField("dlcPalettes", np);
+                fDlcPaletteIds   = mgrType.GetField("dlcPalettesIds", np);
+                mGetSettingsPath = mgrType.GetMethod("GetPathSkinSettings", np, null, Type.EmptyTypes, null);
+                mParseSettings   = mgrType.GetMethod("ParseCurrentSkinSettings", np, null, new[] { typeof(string) }, null);
             }
 
             if (extrasType != null)
@@ -88,14 +117,20 @@ namespace BlasSkinUnlocker
             }
 
             ready = pCorePalettes != null && mGetAllIds != null && mGetUnlockedIds != null && mUnlock != null && mLock != null;
-            L.LogInfo($"[SkinUnlocker] v1.2 ready={ready}. skinsPage={extrasType != null && fCurrentMenu != null}. {cfgToggleKey.Value}=toggle panel.");
+            L.LogInfo($"[SkinUnlocker] v1.3 ready={ready}. skinsPage={extrasType != null && fCurrentMenu != null}. dlcFix={fDlcPalettes != null}, remembered={forcedDlc.Count}. {cfgToggleKey.Value}=toggle panel.");
             if (!ready) L.LogWarning("[SkinUnlocker] color palette API not fully resolved - toggling may be unavailable.");
+            if (fDlcPalettes == null) L.LogWarning("[SkinUnlocker] DLC palette map not resolved - Backer/Deluxe unlocks won't survive a restart.");
         }
 
         void Update()
         {
             gateAccum += Time.unscaledDeltaTime;
-            if (gateAccum >= 0.3f) { gateAccum = 0f; onSkinsPage = IsOnSkinsPage(); }
+            if (gateAccum >= 0.3f)
+            {
+                gateAccum = 0f;
+                onSkinsPage = IsOnSkinsPage();
+                EnsureDlcUnlocks();
+            }
 
             // The hotkey only hides/shows the panel WHILE the Skins page is open, so it can't clash
             // with other mods' hotkeys during normal gameplay. Reset when we leave the page.
@@ -122,6 +157,8 @@ namespace BlasSkinUnlocker
 
         object Mgr() => SafeGet(() => pCorePalettes?.GetValue(null, null));
 
+        string CurrentSkin(object mgr) => SafeGet(() => mGetCurrent?.Invoke(mgr, null)) as string ?? "";
+
         void BuildList()
         {
             skins = new List<string>();
@@ -142,22 +179,108 @@ namespace BlasSkinUnlocker
             return set;
         }
 
+        // ---- DLC skins (Backer / Deluxe) ----------------------------------------
+
+        // The game gates these two on DLC ownership and never saves an unlock for them, so the mod
+        // re-applies its own list to the ownership map once the manager has initialized.
+        void EnsureDlcUnlocks()
+        {
+            var mgr = Mgr();
+            if (mgr == null || fDlcPalettes == null) return;
+            // currentColorPaletteId is empty until ColorPaletteManager.Initialize() has run.
+            if (CurrentSkin(mgr).Length == 0) return;
+
+            bool first = !ReferenceEquals(mgr, repairedMgr);
+            repairedMgr = mgr;
+
+            var applied = new List<string>();
+            foreach (var id in forcedDlc) if (SetDlcOwned(mgr, id, true)) applied.Add(id);
+            if (first && applied.Count > 0) L.LogInfo($"[SkinUnlocker] re-applied DLC skin unlock(s): {string.Join(", ", applied.ToArray())}.");
+            if (first) RestoreSavedSkin(mgr);
+        }
+
+        // dlcPalettes is the ownership map IsColorPaletteUnlocked / GetAllUnlockedColorPalettesId
+        // consult for the DLC skins, so flipping it is what actually unlocks (or relocks) them.
+        // Returns true when the value changed.
+        bool SetDlcOwned(object mgr, string id, bool owned)
+        {
+            var map = SafeGet(() => fDlcPalettes?.GetValue(mgr)) as IDictionary;
+            if (map == null || !map.Contains(id)) return false;
+            if (map[id] is bool b && b == owned) return false;
+            SafeSet(() => map[id] = owned);
+            return true;
+        }
+
+        bool IsDlcSkin(object mgr, string id)
+        {
+            if (dlcSkinIds == null && mgr != null)
+            {
+                var set = new HashSet<string>();
+                var ids = SafeGet(() => fDlcPaletteIds?.GetValue(mgr)) as IEnumerable;
+                if (ids != null) foreach (object o in ids) if (o is string s) set.Add(s);
+                if (set.Count > 0) dlcSkinIds = set;
+            }
+            if (dlcSkinIds != null) return dlcSkinIds.Contains(id);
+            return id == "PENITENT_BACKER" || id == "PENITENT_DELUXE";
+        }
+
+        // Initialize() falls back to the default skin whenever the saved selection isn't unlocked -
+        // which is exactly what a DLC skin looks like before EnsureDlcUnlocks() runs. Put the saved
+        // selection back so the skin you were wearing also survives the restart.
+        void RestoreSavedSkin(object mgr)
+        {
+            if (forcedDlc.Count == 0 || mGetSettingsPath == null || mParseSettings == null || mSetCurrent == null) return;
+            string path = SafeGet(() => mGetSettingsPath.Invoke(mgr, null)) as string;
+            if (string.IsNullOrEmpty(path)) return;
+            var settings = SafeGet(() => mParseSettings.Invoke(mgr, new object[] { path })) as IDictionary;
+            if (settings == null || !settings.Contains("CURRENT_SKIN")) return;
+            object entry = settings["CURRENT_SKIN"];   // FullSerializer.fsData
+            string saved = SafeGet(() => entry?.GetType().GetProperty("AsString")?.GetValue(entry, null)) as string;
+            // Only the DLC skins need this; every other selection was restored correctly already.
+            if (string.IsNullOrEmpty(saved) || !forcedDlc.Contains(saved) || saved == CurrentSkin(mgr)) return;
+            SafeSet(() => mSetCurrent.Invoke(mgr, new object[] { saved }));
+            L.LogInfo($"[SkinUnlocker] restored selected skin {saved}.");
+        }
+
+        // Remember (or forget) a DLC skin unlock in this mod's config, since the game's save can't.
+        void RememberForcedDlc(string id, bool forced)
+        {
+            if (!(forced ? forcedDlc.Add(id) : forcedDlc.Remove(id))) return;
+            var ids = new List<string>(forcedDlc);
+            ids.Sort();
+            cfgForcedDlc.Value = string.Join(",", ids.ToArray());
+            Config.Save();
+        }
+
+        // ---- toggling -----------------------------------------------------------
+
+        // The extras menu hides the whole Skins page (and with it this panel) while fewer than two
+        // skins are unlocked, and the game treats the default skin as permanently unlocked anyway -
+        // so locking it would only break the UI we live on.
+        static bool CanLock(string id) => id != DefaultSkin;
+
         void SetUnlocked(string id, bool unlocked)
         {
             var mgr = Mgr();
-            if (mgr == null) return;
+            if (mgr == null || (!unlocked && !CanLock(id))) return;
+            bool dlc = IsDlcSkin(mgr, id);
+
             if (unlocked)
             {
-                SafeSet(() => mUnlock.Invoke(mgr, new object[] { id, false }));   // persists internally, no popup
+                if (dlc) { SetDlcOwned(mgr, id, true); RememberForcedDlc(id, true); }
+                else SafeSet(() => mUnlock.Invoke(mgr, new object[] { id, false }));   // persists internally, no popup
             }
             else
             {
+                if (dlc) { SetDlcOwned(mgr, id, false); RememberForcedDlc(id, false); }
                 SafeSet(() => mLock.Invoke(mgr, new object[] { id }));
-                // LockColorPalette only writes the file if it was the current skin; force a save.
-                string cur = SafeGet(() => mGetCurrent?.Invoke(mgr, null)) as string ?? "PENITENT_DEFAULT";
-                SafeSet(() => mSetSkinSettings?.Invoke(mgr, new object[] { cur }));
+                // LockColorPalette only writes the file if it was the current skin; force a save,
+                // and drop the selection if it still points at the skin we just locked.
+                string cur = CurrentSkin(mgr);
+                string target = (cur == id || cur.Length == 0) ? DefaultSkin : cur;
+                SafeSet(() => mSetSkinSettings?.Invoke(mgr, new object[] { target }));
             }
-            L.LogInfo($"[SkinUnlocker] {id} -> {(unlocked ? "UNLOCKED" : "LOCKED")}.");
+            L.LogInfo($"[SkinUnlocker] {id} -> {(unlocked ? "UNLOCKED" : "LOCKED")}{(dlc ? " (DLC)" : "")}.");
         }
 
         void SetAll(bool unlocked)
@@ -167,12 +290,15 @@ namespace BlasSkinUnlocker
             if (mgr == null) return;
             foreach (var id in skins)
             {
-                if (unlocked) SafeSet(() => mUnlock.Invoke(mgr, new object[] { id, false }));
-                else          SafeSet(() => mLock.Invoke(mgr, new object[] { id }));
+                if (!unlocked && !CanLock(id)) continue;
+                if (IsDlcSkin(mgr, id)) { SetDlcOwned(mgr, id, unlocked); RememberForcedDlc(id, unlocked); }
+                else if (unlocked) SafeSet(() => mUnlock.Invoke(mgr, new object[] { id, false }));
+                else               SafeSet(() => mLock.Invoke(mgr, new object[] { id }));
             }
-            // one persist pass at the end
-            string cur = SafeGet(() => mGetCurrent?.Invoke(mgr, null)) as string ?? "PENITENT_DEFAULT";
-            SafeSet(() => mSetSkinSettings?.Invoke(mgr, new object[] { cur }));
+            // one persist pass at the end; nothing but the default is wearable after "Lock all"
+            string cur = CurrentSkin(mgr);
+            string target = (!unlocked || cur.Length == 0) ? DefaultSkin : cur;
+            SafeSet(() => mSetSkinSettings?.Invoke(mgr, new object[] { target }));
         }
 
         // ---- UI -----------------------------------------------------------------
@@ -216,12 +342,14 @@ namespace BlasSkinUnlocker
                 rowStyle.normal.textColor = isOn ? new Color(0.6f, 0.9f, 0.6f) : new Color(0.82f, 0.82f, 0.85f);
                 GUILayout.Label(id, rowStyle);
                 GUILayout.FlexibleSpace();
-                if (GUILayout.Button(isOn ? "Lock" : "Unlock", btnStyle, GUILayout.Width(70f))) SetUnlocked(id, !isOn);
+                if (IsDlcSkin(mgr, id)) GUILayout.Label("DLC", hintStyle, GUILayout.Width(26f));
+                if (!CanLock(id) && isOn) GUILayout.Label("always", hintStyle, GUILayout.Width(70f));
+                else if (GUILayout.Button(isOn ? "Lock" : "Unlock", btnStyle, GUILayout.Width(70f))) SetUnlocked(id, !isOn);
                 GUILayout.EndHorizontal();
             }
             GUILayout.EndScrollView();
 
-            GUILayout.Label("Changes save to the skin-settings file. New unlocks appear in the carousel next time you open the Skins page.", hintStyle);
+            GUILayout.Label("Changes save to the skin-settings file, except the DLC skins - the game won't keep those, so the mod re-applies them (and your selection) at every launch. New unlocks appear in the carousel next time you open the Skins page.", hintStyle);
             GUILayout.EndArea();
         }
 
