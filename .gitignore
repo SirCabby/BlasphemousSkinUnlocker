@@ -31,3 +31,6 @@ GameDir.local.props
 
 # ---- Misc ----
 *.log
+
+# ---- Release packaging ----
+dist/

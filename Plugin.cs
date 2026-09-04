@@ -29,7 +29,7 @@ namespace BlasSkinUnlocker
     // those ids the mod flips `dlcPalettes` directly, remembers them in its own config, and
     // re-applies them at every launch - along with the saved skin selection, which Initialize()
     // resets to the default while the DLC skin still looks locked.
-    [BepInPlugin("local.blasphemous.skinunlocker", "Blasphemous Skin Unlocker", "1.3.0")]
+    [BepInPlugin("local.blasphemous.skinunlocker", "Blasphemous Skin Unlocker", PluginVersion.Value)]
     public class SkinUnlocker : BaseUnityPlugin
     {
         const string CoreName    = "Framework.Managers.Core";
@@ -117,7 +117,7 @@ namespace BlasSkinUnlocker
             }
 
             ready = pCorePalettes != null && mGetAllIds != null && mGetUnlockedIds != null && mUnlock != null && mLock != null;
-            L.LogInfo($"[SkinUnlocker] v1.3 ready={ready}. skinsPage={extrasType != null && fCurrentMenu != null}. dlcFix={fDlcPalettes != null}, remembered={forcedDlc.Count}. {cfgToggleKey.Value}=toggle panel.");
+            L.LogInfo($"[SkinUnlocker] v{PluginVersion.Value} ready={ready}. skinsPage={extrasType != null && fCurrentMenu != null}. dlcFix={fDlcPalettes != null}, remembered={forcedDlc.Count}. {cfgToggleKey.Value}=toggle panel.");
             if (!ready) L.LogWarning("[SkinUnlocker] color palette API not fully resolved - toggling may be unavailable.");
             if (fDlcPalettes == null) L.LogWarning("[SkinUnlocker] DLC palette map not resolved - Backer/Deluxe unlocks won't survive a restart.");
         }

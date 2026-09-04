@@ -15,6 +15,15 @@
     <EnableDefaultCompileItems>true</EnableDefaultCompileItems>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
 
+    <!-- The VERSION file at the repo root is the only place the mod version is
+         written down; `make version 1.2.3` rewrites it. It feeds the assembly
+         version here and PluginVersion.Value below (used by [BepInPlugin]). -->
+    <VersionFile>$(MSBuildProjectDirectory)/VERSION</VersionFile>
+    <Version Condition="Exists('$(VersionFile)')">$([System.IO.File]::ReadAllText('$(VersionFile)').Trim())</Version>
+    <AssemblyVersion>$(Version)</AssemblyVersion>
+    <FileVersion>$(Version)</FileVersion>
+    <InformationalVersion>$(Version)</InformationalVersion>
+
     <!-- Default/example install path. Don't edit this — override <GameDir> in
          GameDir.local.props instead (see the comment at the top of this file). -->
     <GameDir Condition="'$(GameDir)' == ''">C:\Program Files (x86)\Steam\steamapps\common\Blasphemous</GameDir>
@@ -39,5 +48,29 @@
     <!-- If `Input` fails to resolve on build, uncomment the next line: -->
     <!-- <Reference Include="UnityEngine.InputLegacyModule"><HintPath>$(Managed)\UnityEngine.InputLegacyModule.dll</HintPath><Private>false</Private></Reference> -->
   </ItemGroup>
+
+  <!-- [BepInPlugin] needs a compile-time literal, so mirror VERSION into a generated
+       constant instead of hardcoding it a second time in Plugin.cs. (%3B is an
+       escaped ';' — WriteLinesToFile would otherwise split the line there.) -->
+  <Target Name="GeneratePluginVersion" BeforeTargets="BeforeCompile">
+    <PropertyGroup>
+      <GeneratedVersionFile>$(IntermediateOutputPath)PluginVersion.g.cs</GeneratedVersionFile>
+    </PropertyGroup>
+    <ItemGroup>
+      <PluginVersionLine Include="// &lt;auto-generated /&gt; Generated from the VERSION file — do not edit." />
+      <PluginVersionLine Include="namespace BlasSkinUnlocker" />
+      <PluginVersionLine Include="{" />
+      <PluginVersionLine Include="    internal static class PluginVersion" />
+      <PluginVersionLine Include="    {" />
+      <PluginVersionLine Include="        public const string Value = &quot;$(Version)&quot;%3B" />
+      <PluginVersionLine Include="    }" />
+      <PluginVersionLine Include="}" />
+    </ItemGroup>
+    <WriteLinesToFile File="$(GeneratedVersionFile)" Lines="@(PluginVersionLine)" Overwrite="true" WriteOnlyWhenDifferent="true" />
+    <ItemGroup>
+      <Compile Include="$(GeneratedVersionFile)" />
+      <FileWrites Include="$(GeneratedVersionFile)" />
+    </ItemGroup>
+  </Target>
 
 </Project>

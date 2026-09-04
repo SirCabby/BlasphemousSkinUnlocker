@@ -43,8 +43,30 @@ game files on disk beyond that save.
 - Game: Steam Blasphemous, Unity 2017.4 (**Mono CLR 2.0**) → plugin targets **net35**.
 - Requires BepInEx 5.x (x64, Mono) installed in the game folder.
 - Copy `GameDir.local.props.example` to `GameDir.local.props` and set `<GameDir>` to your
-  install (this file is gitignored), then `dotnet build -c Release`.
+  install (this file is gitignored), then `make build` (or `dotnet build -c Release`).
 - Copy `bin/Release/BlasSkinUnlocker.dll` to `Blasphemous/BepInEx/plugins/`.
+
+## Versioning & releases
+
+The version is written down in exactly one place: the **`VERSION`** file at the repo root. The
+build reads it for the assembly version and generates the constant `[BepInPlugin]` reports, so
+bumping that file is the whole job.
+
+```sh
+make version          # print the current version
+make version 1.2.3    # set the version to 1.2.3
+make build            # build Release
+make package          # build, then write dist/BlasSkinUnlocker_v<version>.zip
+make clean            # remove bin/, obj/ and dist/
+```
+
+The release zip extracts straight into the game folder:
+
+```
+BepInEx/plugins/BlasSkinUnlocker.dll
+README.md
+LICENSE
+```
 
 ## Usage
 

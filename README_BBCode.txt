@@ -48,6 +48,6 @@ Delete [b]BlasSkinUnlocker.dll[/b] from [i]BepInEx\plugins[/i]. Any skins you al
 
 [size=5][b]Troubleshooting[/b][/size]
 [list]
-[*][b]Panel doesn't appear?[/b] It only shows on the [b]Extras → Skins[/b] page; press [b]F9[/b] there if you hid it. Then open [i]BepInEx\LogOutput.log[/i] and look for [b][SkinUnlocker] v1.3 ready=True[/b]; a warning there means the game's skin code didn't match (e.g. after a game update).
+[*][b]Panel doesn't appear?[/b] It only shows on the [b]Extras → Skins[/b] page; press [b]F9[/b] there if you hid it. Then open [i]BepInEx\LogOutput.log[/i] and look for a line like [b][SkinUnlocker] v1.0.0 ready=True[/b]; a warning there means the game's skin code didn't match (e.g. after a game update).
 [*][b]Nothing loads at all?[/b] Double-check you used BepInEx [b]5.4.x x64 (Mono)[/b], extracted it into the game folder (not a subfolder), and ran the game once before adding the DLL.
 [/list]
